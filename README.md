@@ -2,8 +2,6 @@
 
 A **Retrieval-Augmented Generation (RAG)** chatbot built with **Flask** that allows users to upload PDFs, extract text, create embeddings, and interact conversationally using an LLM.
 
----
-
 ## 🚀 Features
 - PDF text extraction
 - Chunking and vector embeddings using FAISS
@@ -12,8 +10,6 @@ A **Retrieval-Augmented Generation (RAG)** chatbot built with **Flask** that all
 - Dockerized for easy deployment
 - Optional CI/CD to **Google Cloud Run**
 
----
-
 ## 🧰 Tech Stack
 - **Python 3.11+**
 - **Flask**
@@ -21,8 +17,6 @@ A **Retrieval-Augmented Generation (RAG)** chatbot built with **Flask** that all
 - **Hugging Face Transformers**
 - **Google Generative AI / Gemini**
 - **Docker + Cloud Run**
-
----
 
 ## 🧑‍💻 Local Setup
 
@@ -33,3 +27,37 @@ cd pdf-rag-chatbot
 python -m venv .venv
 source .venv/bin/activate    # or .venv\Scripts\activate on Windows
 pip install -r requirements.txt
+```
+
+### 2. Set environment variables
+Copy `.env.example` → `.env` and update values:
+```bash
+PROJECT_ID=rag-chatbot-demo-474412
+BUCKET_NAME=pdf-rag-chatbot-bucket
+SECRET_KEY=super-secret
+```
+
+### 3. Run locally
+```bash
+python app.py
+```
+Then visit [http://localhost:5000](http://localhost:5000)
+
+## 🐳 Docker Usage
+```bash
+docker build -t pdf-rag-chatbot .
+docker run -p 8080:8080 pdf-rag-chatbot
+```
+
+## ☁️ Deploy to Google Cloud Run
+1. Enable Cloud Run and Artifact Registry in your GCP project.
+2. Configure GitHub Secrets:
+   - `GCP_SERVICE_ACCOUNT_KEY`
+   - `GCP_PROJECT`
+   - `GCP_REGION`
+   - `CLOUD_RUN_SERVICE`
+3. Push to main branch — deployment triggers automatically.
+
+## ⚙️ Security
+🚫 Do **not** commit API keys, JSON credentials, or private `.env` files.
+All secrets go in GitHub → Settings → Secrets → Actions.
