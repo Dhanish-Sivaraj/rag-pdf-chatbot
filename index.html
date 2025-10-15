@@ -1,0 +1,373 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>RAG PDF Chatbot</title>
+    <style>
+        body { 
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; 
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            margin: 0; 
+            padding: 20px; 
+            min-height: 100vh;
+        }
+        .container { 
+            max-width: 900px; 
+            margin: 20px auto; 
+            background: #fff; 
+            padding: 30px; 
+            border-radius: 15px; 
+            box-shadow: 0 10px 30px rgba(0,0,0,0.2);
+        }
+        h1 { 
+            text-align: center; 
+            color: #333; 
+            margin-bottom: 30px;
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            background-clip: text;
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        .section {
+            background: #f8f9fa;
+            padding: 20px;
+            border-radius: 10px;
+            margin: 20px 0;
+            border: 1px solid #e9ecef;
+        }
+        .section-title {
+            color: #495057;
+            margin-bottom: 15px;
+            font-size: 18px;
+            font-weight: 600;
+        }
+        input, button, textarea, select { 
+            width: 100%; 
+            padding: 12px; 
+            margin: 8px 0; 
+            border-radius: 8px; 
+            border: 1px solid #ddd;
+            box-sizing: border-box;
+            font-size: 14px;
+        }
+        button {
+            background: linear-gradient(135deg, #667eea, #764ba2);
+            color: white;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+            transition: transform 0.2s;
+        }
+        button:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 15px rgba(0,0,0,0.2);
+        }
+        button:disabled {
+            background: #6c757d;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .status {
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            text-align: center;
+            font-weight: bold;
+        }
+        .status.healthy {
+            background: #d4edda;
+            color: #155724;
+            border: 1px solid #c3e6cb;
+        }
+        .status.error {
+            background: #f8d7da;
+            color: #721c24;
+            border: 1px solid #f5c6cb;
+        }
+        .status.info {
+            background: #d1ecf1;
+            color: #0c5460;
+            border: 1px solid #bee5eb;
+        }
+        .chat-message {
+            margin: 15px 0;
+            padding: 15px;
+            border-radius: 10px;
+            white-space: pre-line;
+        }
+        .user-message {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+        }
+        .bot-message {
+            background: #f3e5f5;
+            border-left: 4px solid #9c27b0;
+        }
+        .clear-btn {
+            background: #dc3545;
+            width: auto;
+            padding: 8px 16px;
+            font-size: 12px;
+        }
+        .clear-btn:hover {
+            background: #c82333;
+        }
+        .current-pdf {
+            background: #fff3cd;
+            color: #856404;
+            padding: 10px;
+            border-radius: 5px;
+            margin: 10px 0;
+            border: 1px solid #ffeaa7;
+            text-align: center;
+            font-weight: bold;
+        }
+        #chatHistory {
+            max-height: 400px;
+            overflow-y: auto;
+            margin-bottom: 20px;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h1>📚 PDF RAG Chatbot</h1>
+        
+        {% if not clients_ok %}
+        <div class="status error">
+            ⚠️ System not available
+        </div>
+        {% else %}
+        <div class="status healthy">
+            ✅ System connected successfully
+        </div>
+        {% endif %}
+
+        {% if current_pdf %}
+        <div class="current-pdf">
+            📄 Currently loaded: <strong>{{ current_pdf }}</strong>
+        </div>
+        {% endif %}
+
+        <div class="section">
+            <div class="section-title">📁 Upload New PDF</div>
+            <form id="uploadForm" enctype="multipart/form-data">
+                <input type="file" name="pdf" id="pdfFile" accept=".pdf" required>
+                <button type="submit" id="uploadBtn">Upload & Process PDF</button>
+            </form>
+            <div id="uploadResult"></div>
+        </div>
+
+        <div class="section">
+            <div class="section-title">📚 Load Existing PDF</div>
+            <select id="pdfSelect">
+                <option value="">-- Select a PDF --</option>
+                {% for pdf in pdfs %}
+                    <option value="{{ pdf }}">{{ pdf }}</option>
+                {% endfor %}
+            </select>
+            <button onclick="loadExistingPDF()" id="loadBtn">Load Selected PDF</button>
+            <div id="loadResult"></div>
+        </div>
+
+        {% if has_documents %}
+        <div style="text-align: center; margin: 20px 0;">
+            <button class="clear-btn" onclick="clearDocuments()">🗑️ Clear Current PDF</button>
+        </div>
+        {% endif %}
+
+        <div class="section">
+            <div class="section-title">💬 Chat with PDF</div>
+            <div id="chatHistory"></div>
+            <textarea id="userInput" placeholder="Ask a question about the loaded PDF..." 
+                     rows="3" {% if not has_documents %}disabled{% endif %}></textarea>
+            <button onclick="sendMessage()" id="sendBtn" {% if not has_documents %}disabled{% endif %}>
+                {% if not has_documents %}Please load a PDF first{% else %}Send Message{% endif %}
+            </button>
+            <div id="chatResult"></div>
+        </div>
+    </div>
+
+    <script>
+        let isProcessing = false;
+
+        // Handle PDF upload
+        document.getElementById('uploadForm').addEventListener('submit', async function(e) {
+            e.preventDefault();
+            if (isProcessing) return;
+
+            const fileInput = document.getElementById('pdfFile');
+            const uploadBtn = document.getElementById('uploadBtn');
+            const resultDiv = document.getElementById('uploadResult');
+
+            if (!fileInput.files[0]) {
+                showResult(resultDiv, 'Please select a PDF file', 'error');
+                return;
+            }
+
+            isProcessing = true;
+            uploadBtn.disabled = true;
+            uploadBtn.textContent = 'Processing...';
+
+            const formData = new FormData();
+            formData.append('pdf', fileInput.files[0]);
+
+            try {
+                const response = await fetch('/upload', {
+                    method: 'POST',
+                    body: formData
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult(resultDiv, data.success, 'success');
+                    fileInput.value = '';
+                    // Reload page to update PDF list
+                    setTimeout(() => location.reload(), 2000);
+                } else {
+                    showResult(resultDiv, data.error, 'error');
+                }
+            } catch (error) {
+                showResult(resultDiv, 'Upload failed: ' + error, 'error');
+            } finally {
+                isProcessing = false;
+                uploadBtn.disabled = false;
+                uploadBtn.textContent = 'Upload & Process PDF';
+            }
+        });
+
+        // Load existing PDF
+        async function loadExistingPDF() {
+            if (isProcessing) return;
+
+            const pdfSelect = document.getElementById('pdfSelect');
+            const loadBtn = document.getElementById('loadBtn');
+            const resultDiv = document.getElementById('loadResult');
+
+            const selectedPdf = pdfSelect.value;
+            if (!selectedPdf) {
+                showResult(resultDiv, 'Please select a PDF from the dropdown', 'error');
+                return;
+            }
+
+            isProcessing = true;
+            loadBtn.disabled = true;
+            loadBtn.textContent = 'Loading...';
+
+            try {
+                const response = await fetch('/load', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({pdf_name: selectedPdf})
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    showResult(resultDiv, data.success, 'success');
+                    // Reload page to update current PDF display
+                    setTimeout(() => location.reload(), 1000);
+                } else {
+                    showResult(resultDiv, data.error, 'error');
+                }
+            } catch (error) {
+                showResult(resultDiv, 'Load failed: ' + error, 'error');
+            } finally {
+                isProcessing = false;
+                loadBtn.disabled = false;
+                loadBtn.textContent = 'Load Selected PDF';
+            }
+        }
+
+        // Send chat message
+        async function sendMessage() {
+            if (isProcessing) return;
+
+            const userInput = document.getElementById('userInput');
+            const sendBtn = document.getElementById('sendBtn');
+            const chatHistory = document.getElementById('chatHistory');
+            const message = userInput.value.trim();
+
+            if (!message) return;
+
+            isProcessing = true;
+            sendBtn.disabled = true;
+            userInput.disabled = true;
+
+            // Add user message to chat
+            addMessage(chatHistory, `You: ${message}`, 'user');
+
+            try {
+                const response = await fetch('/chat', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({message: message})
+                });
+
+                const data = await response.json();
+
+                if (response.ok) {
+                    addMessage(chatHistory, `Bot: ${data.response}`, 'bot');
+                } else {
+                    addMessage(chatHistory, `Error: ${data.error}`, 'bot');
+                }
+            } catch (error) {
+                addMessage(chatHistory, `Network error: ${error}`, 'bot');
+            } finally {
+                isProcessing = false;
+                sendBtn.disabled = false;
+                userInput.disabled = false;
+                userInput.value = '';
+                userInput.focus();
+                
+                // Scroll to bottom
+                chatHistory.scrollTop = chatHistory.scrollHeight;
+            }
+        }
+
+        // Clear documents
+        async function clearDocuments() {
+            if (!confirm('Are you sure you want to clear the current PDF from memory?')) {
+                return;
+            }
+
+            try {
+                const response = await fetch('/clear', {method: 'POST'});
+                const data = await response.json();
+
+                if (response.ok) {
+                    alert(data.success);
+                    location.reload();
+                } else {
+                    alert('Error: ' + data.error);
+                }
+            } catch (error) {
+                alert('Clear failed: ' + error);
+            }
+        }
+
+        // Helper functions
+        function showResult(element, message, type) {
+            element.innerHTML = `<div class="status ${type}">${message}</div>`;
+            setTimeout(() => element.innerHTML = '', 5000);
+        }
+
+        function addMessage(container, message, sender) {
+            const messageDiv = document.createElement('div');
+            messageDiv.className = `chat-message ${sender}-message`;
+            messageDiv.textContent = message;
+            container.appendChild(messageDiv);
+        }
+
+        // Enable Enter key to send message
+        document.getElementById('userInput').addEventListener('keypress', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>

@@ -1,0 +1,12 @@
+Flask
+google-cloud-storage
+pypdf
+faiss-cpu
+numpy
+torch
+transformers
+sentence-transformers
+accelerate
+gunicorn
+nltk
+google-generativeai
