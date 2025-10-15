@@ -22,7 +22,7 @@ A **Retrieval-Augmented Generation (RAG)** chatbot built with **Flask** that all
 
 ### 1. Clone and install dependencies
 ```bash
-git clone https://github.com/<your-username>/pdf-rag-chatbot.git
+git clone https://github.com/Dhanish-Sivaraj/pdf-rag-chatbot.git
 cd pdf-rag-chatbot
 python -m venv .venv
 source .venv/bin/activate    # or .venv\Scripts\activate on Windows
@@ -32,9 +32,10 @@ pip install -r requirements.txt
 ### 2. Set environment variables
 Copy `.env.example` → `.env` and update values:
 ```bash
-PROJECT_ID=rag-chatbot-demo-474412
-BUCKET_NAME=pdf-rag-chatbot-bucket
-SECRET_KEY=super-secret
+PROJECT_ID=your-project-id
+BUCKET_NAME=your-bucket-name
+SECRET_KEY=your-secret-key
+LOCATION=your-region
 ```
 
 ### 3. Run locally
