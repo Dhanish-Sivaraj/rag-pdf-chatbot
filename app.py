@@ -20,10 +20,10 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # Environment Variables
-PROJECT_ID = os.environ.get("PROJECT_ID", "rag-chatbot-demo-474412")
-REGION = os.environ.get("REGION", "asia-south1")
-BUCKET_NAME = os.environ.get("BUCKET_NAME", "rag-chatbot-pdf")
-SECRET_KEY = os.environ.get("SECRET_KEY", "824cd27942e5cd7b7982f1288962c415d7a8a17f89d2f248bf4185f91131e070")
+PROJECT_ID = os.environ.get("PROJECT_ID", "your-project-id")
+REGION = os.environ.get("REGION", "your-region")
+BUCKET_NAME = os.environ.get("BUCKET_NAME", "your-bucket-name")
+SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key")
 
 logger.info(f"🚀 Initializing PDF RAG Chatbot")
 logger.info(f"📁 Project: {PROJECT_ID}, Region: {REGION}, Bucket: {BUCKET_NAME}")
