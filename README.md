@@ -18,6 +18,15 @@ A **Retrieval-Augmented Generation (RAG)** chatbot built with **Flask** that all
 - **Google Generative AI / Gemini**
 - **Docker + Cloud Run**
 
+## 📂 Folder structure:
+├── app.py             # Flask app
+├── requirements.txt
+├── Dockerfile         
+├── templates/
+│   ├── index.html     # HTML templates
+└── utils/
+    ├── rag_utils.py  # Utility functions
+
 ## 🧑‍💻 Local Setup
 
 ### 1. Clone and install dependencies
