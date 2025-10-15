@@ -253,7 +253,7 @@ def chunk_text(text, chunk_size=600):
     
     logger.info(f"✂️ Chunking text of {len(text)} characters...")
     
-    # First try paragraph-based chunking (most coherent)
+    # try paragraph-based chunking (most coherent)
     paragraphs = [p.strip() for p in text.split('\n\n') if p.strip() and len(p.strip()) > 50]
     
     chunks = []
@@ -261,7 +261,7 @@ def chunk_text(text, chunk_size=600):
         if len(paragraph) <= chunk_size:
             chunks.append(paragraph)
         else:
-            # Split long paragraphs by sentences more carefully
+            # Split long paragraphs by sentences
             sentences = re.split(r'(?<=[.!?])\s+', paragraph)
             
             current_chunk = ""
