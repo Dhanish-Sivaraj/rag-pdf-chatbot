@@ -19,6 +19,7 @@ A **Retrieval-Augmented Generation (RAG)** chatbot built with **Flask** that all
 - **Docker + Cloud Run**
 
 ## 📂 Folder structure:
+```bash
 your-folder-name/
 ├── app.py # Flask application
 ├── requirements.txt # Python dependencies
@@ -27,6 +28,7 @@ your-folder-name/
 │ └── index.html # HTML templates for Flask
 └── utils/
 └── rag_utils.py # Utility functions (RAG pipeline)
+```
 
 ## 🧑‍💻 Local Setup
 
