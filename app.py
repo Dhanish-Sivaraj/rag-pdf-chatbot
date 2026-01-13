@@ -8,7 +8,6 @@ import json
 from datetime import datetime, timedelta
 from flask import Flask, render_template, request, jsonify, session
 from werkzeug.utils import secure_filename
-from google.cloud import storage
 import pypdf
 from utils.rag_utils import RAGSystem, LLMClient
 
@@ -19,14 +18,13 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Environment Variables
-PROJECT_ID = os.environ.get("PROJECT_ID", "your-project-id")
-REGION = os.environ.get("REGION", "your-region")
-BUCKET_NAME = os.environ.get("BUCKET_NAME", "your-bucket-name")
-SECRET_KEY = os.environ.get("SECRET_KEY", "your-secret-key")
+# Environment Variables for Render
+GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+SECRET_KEY = os.environ.get("SECRET_KEY", "your-render-secret-key-change-in-production")
+PORT = int(os.environ.get("PORT", 10000))  # Render uses port 10000
 
-logger.info(f"🚀 Initializing PDF RAG Chatbot")
-logger.info(f"📁 Project: {PROJECT_ID}, Region: {REGION}, Bucket: {BUCKET_NAME}")
+logger.info(f"🚀 Initializing PDF RAG Chatbot for Render")
+logger.info(f"📡 Port: {PORT}, Gemini API Key configured: {bool(GEMINI_API_KEY)}")
 
 # Flask App Configuration
 app = Flask(__name__)
@@ -40,131 +38,70 @@ logger.info("🔄 Initializing RAG system and LLM client...")
 rag_system = RAGSystem()
 llm_client = LLMClient()
 
-# Cloud Storage Client Initialization
-storage_client = None
-bucket = None
-clients_initialized = False
+# Simple local storage management for Render
+class RenderStorage:
+    def __init__(self, base_folder=None):
+        self.base_folder = base_folder or tempfile.gettempdir()
+        self.documents = {}
+        os.makedirs(self.base_folder, exist_ok=True)
+        
+    def save_file(self, file, filename):
+        """Save uploaded file to temporary storage"""
+        filepath = os.path.join(self.base_folder, secure_filename(filename))
+        file.save(filepath)
+        logger.info(f"💾 Saved file: {filename} to {filepath}")
+        return filepath
+    
+    def save_json(self, data, filename):
+        """Save JSON data to temporary storage"""
+        filepath = os.path.join(self.base_folder, secure_filename(filename))
+        with open(filepath, 'w', encoding='utf-8') as f:
+            json.dump(data, f, indent=2)
+        logger.info(f"💾 Saved JSON: {filename}")
+        return filepath
+    
+    def load_json(self, filename):
+        """Load JSON data from temporary storage"""
+        filepath = os.path.join(self.base_folder, secure_filename(filename))
+        if os.path.exists(filepath):
+            with open(filepath, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        logger.warning(f"⚠️ File not found: {filename}")
+        return None
+    
+    def file_exists(self, filename):
+        """Check if file exists in storage"""
+        filepath = os.path.join(self.base_folder, secure_filename(filename))
+        return os.path.exists(filepath)
+    
+    def list_files(self, extension=None):
+        """List files in storage"""
+        files = []
+        for f in os.listdir(self.base_folder):
+            if extension and not f.endswith(extension):
+                continue
+            files.append(f)
+        return files
+    
+    def delete_file(self, filename):
+        """Delete file from storage"""
+        filepath = os.path.join(self.base_folder, secure_filename(filename))
+        if os.path.exists(filepath):
+            os.remove(filepath)
+            logger.info(f"🗑️ Deleted file: {filename}")
+            return True
+        return False
 
-try:
-    logger.info("☁️ Initializing Google Cloud Storage...")
-    storage_client = storage.Client()
-    bucket = storage_client.bucket(BUCKET_NAME)
-    
-    if not bucket.exists():
-        logger.info(f"📦 Creating bucket: {BUCKET_NAME} in {REGION}")
-        bucket = storage_client.create_bucket(BUCKET_NAME, location=REGION)
-        logger.info(f"✅ Bucket {BUCKET_NAME} created successfully")
-    else:
-        logger.info(f"✅ Bucket {BUCKET_NAME} already exists")
-    
-    clients_initialized = True
-    logger.info("✅ Cloud Storage initialized successfully")
-    
-except Exception as e:
-    logger.error(f"❌ Storage initialization failed: {e}")
-    clients_initialized = False
+# Initialize storage
+storage = RenderStorage()
+
+# Track currently processed PDFs in memory (session-based)
+processed_pdfs = {}
 
 # ----------------- Helper Functions -----------------
-def upload_to_bucket(local_path, dest_folder, dest_filename):
-    """Upload file to Google Cloud Storage bucket"""
-    if not clients_initialized:
-        raise Exception("Cloud storage not available")
-    
-    blob_name = f"{dest_folder}/{dest_filename}"
-    try:
-        blob = bucket.blob(blob_name)
-        blob.upload_from_filename(local_path)
-        logger.info(f"📤 Uploaded to: {blob_name}")
-        return blob_name
-    except Exception as e:
-        logger.error(f"❌ Upload failed for {blob_name}: {e}")
-        raise
-
-def list_pdfs():
-    """List all PDF files from the pdfs folder in storage"""
-    if not clients_initialized:
-        logger.warning("Cloud storage not available for listing PDFs")
-        return []
-    
-    try:
-        blobs = bucket.list_blobs(prefix="pdfs/")
-        pdfs = []
-        for blob in blobs:
-            if blob.name.endswith('.pdf') and blob.name != "pdfs/":
-                pdf_name = os.path.basename(blob.name)
-                pdfs.append(pdf_name)
-        
-        logger.info(f"📚 Found {len(pdfs)} PDFs in storage")
-        return pdfs
-    except Exception as e:
-        logger.error(f"❌ Failed to list PDFs: {e}")
-        return []
-
-def file_exists(folder, filename):
-    """Check if a file exists in the specified folder in storage"""
-    if not clients_initialized:
-        return False
-    
-    try:
-        blob_name = f"{folder}/{filename}"
-        blob = bucket.blob(blob_name)
-        exists = blob.exists()
-        logger.debug(f"🔍 File {blob_name} exists: {exists}")
-        return exists
-    except Exception as e:
-        logger.error(f"❌ Error checking file existence {folder}/{filename}: {e}")
-        return False
-
-def download_from_bucket(folder, filename, local_path):
-    """Download file from bucket to local path"""
-    if not clients_initialized:
-        raise Exception("Cloud storage not available")
-    
-    blob_name = f"{folder}/{filename}"
-    try:
-        blob = bucket.blob(blob_name)
-        blob.download_to_filename(local_path)
-        logger.info(f"📥 Downloaded {blob_name} to {local_path}")
-    except Exception as e:
-        logger.error(f"❌ Download failed for {blob_name}: {e}")
-        raise
-
-def upload_json_to_bucket(data, folder, filename):
-    """Upload JSON data to bucket"""
-    if not clients_initialized:
-        raise Exception("Cloud storage not available")
-    
-    blob_name = f"{folder}/{filename}"
-    try:
-        blob = bucket.blob(blob_name)
-        blob.upload_from_string(json.dumps(data, indent=2), content_type='application/json')
-        logger.info(f"📤 Uploaded JSON to: {blob_name}")
-    except Exception as e:
-        logger.error(f"❌ JSON upload failed for {blob_name}: {e}")
-        raise
-
-def download_json_from_bucket(folder, filename):
-    """Download JSON data from bucket"""
-    if not clients_initialized:
-        raise Exception("Cloud storage not available")
-    
-    blob_name = f"{folder}/{filename}"
-    try:
-        blob = bucket.blob(blob_name)
-        if blob.exists():
-            data = blob.download_as_string()
-            logger.info(f"📥 Downloaded JSON from: {blob_name}")
-            return json.loads(data)
-        else:
-            logger.warning(f"⚠️ JSON file not found: {blob_name}")
-            return None
-    except Exception as e:
-        logger.error(f"❌ JSON download failed for {blob_name}: {e}")
-        return None
-
 def clean_text(text: str) -> str:
     """
-    Clean text from PDF extraction issues - standalone function to avoid circular imports
+    Clean text from PDF extraction issues
     """
     if not text:
         return ""
@@ -304,14 +241,13 @@ def get_base_filename(pdf_name):
     return os.path.splitext(pdf_name)[0]
 
 def is_pdf_processed(pdf_name):
-    """Check if PDF is already processed (has text, chunks, and embeddings)"""
+    """Check if PDF is already processed (has chunks and embeddings)"""
     base_name = get_base_filename(pdf_name)
     
-    text_exists = file_exists("texts", f"{base_name}_text.txt")
-    chunks_exists = file_exists("chunks", f"{base_name}_chunks.json")
-    embeddings_exists = file_exists("embeddings", f"{base_name}_embeddings.json")
+    chunks_exists = storage.file_exists(f"{base_name}_chunks.json")
+    embeddings_exists = storage.file_exists(f"{base_name}_embeddings.json")
     
-    processed = text_exists and chunks_exists and embeddings_exists
+    processed = chunks_exists and embeddings_exists
     logger.info(f"🔍 PDF {pdf_name} processed: {processed}")
     
     return processed
@@ -323,32 +259,30 @@ def process_new_pdf(pdf_file, pdf_name):
     logger.info(f"🔄 Starting to process PDF: {pdf_name}")
     
     # Save file temporarily
-    temp_pdf_path = os.path.join(app.config['UPLOAD_FOLDER'], pdf_name)
-    pdf_file.save(temp_pdf_path)
+    temp_pdf_path = storage.save_file(pdf_file, pdf_name)
     
     try:
-        # 1. Upload PDF to pdfs folder
-        logger.info("📤 Step 1: Uploading PDF to Cloud Storage...")
-        upload_to_bucket(temp_pdf_path, "pdfs", pdf_name)
-        
-        # 2. Extract text and upload to texts folder
-        logger.info("📖 Step 2: Extracting text from PDF...")
+        # 1. Extract text from PDF
+        logger.info("📖 Step 1: Extracting text from PDF...")
         text = extract_text_from_pdf(temp_pdf_path)
         
-        text_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{base_name}_text.txt")
-        with open(text_file_path, "w", encoding="utf-8") as f:
-            f.write(text)
-        upload_to_bucket(text_file_path, "texts", f"{base_name}_text.txt")
-        
-        # 3. Create chunks and upload to chunks folder
-        logger.info("✂️ Step 3: Creating text chunks...")
+        # 2. Create chunks and save to storage
+        logger.info("✂️ Step 2: Creating text chunks...")
         chunks = chunk_text(text)
-        upload_json_to_bucket(chunks, "chunks", f"{base_name}_chunks.json")
+        storage.save_json(chunks, f"{base_name}_chunks.json")
         
-        # 4. Generate embeddings and upload to embeddings folder
-        logger.info("🧠 Step 4: Generating embeddings...")
+        # 3. Generate embeddings and save to storage
+        logger.info("🧠 Step 3: Generating embeddings...")
         embeddings = rag_system.add_new_documents(pdf_name, chunks)
-        upload_json_to_bucket(embeddings, "embeddings", f"{base_name}_embeddings.json")
+        storage.save_json(embeddings, f"{base_name}_embeddings.json")
+        
+        # Store in memory for this session
+        session_pdf_key = f"pdf_{pdf_name}"
+        processed_pdfs[session_pdf_key] = {
+            'name': pdf_name,
+            'chunks_count': len(chunks),
+            'processed_at': datetime.utcnow().isoformat()
+        }
         
         logger.info(f"✅ Successfully processed new PDF: {pdf_name} with {len(chunks)} chunks")
         return len(chunks)
@@ -358,15 +292,10 @@ def process_new_pdf(pdf_file, pdf_name):
         logger.error(traceback.format_exc())
         raise
     finally:
-        # Cleanup temp files
+        # Cleanup temp PDF file
         if os.path.exists(temp_pdf_path):
             os.remove(temp_pdf_path)
             logger.debug(f"🧹 Cleaned up temp PDF: {temp_pdf_path}")
-        
-        text_file_path = os.path.join(app.config['UPLOAD_FOLDER'], f"{base_name}_text.txt")
-        if os.path.exists(text_file_path):
-            os.remove(text_file_path)
-            logger.debug(f"🧹 Cleaned up temp text file: {text_file_path}")
 
 def load_processed_pdf(pdf_name):
     """Load already processed PDF from storage with error handling"""
@@ -376,8 +305,8 @@ def load_processed_pdf(pdf_name):
         logger.info(f"📥 Loading processed PDF: {pdf_name}")
         
         # Download chunks and embeddings
-        chunks = download_json_from_bucket("chunks", f"{base_name}_chunks.json")
-        embeddings = download_json_from_bucket("embeddings", f"{base_name}_embeddings.json")
+        chunks = storage.load_json(f"{base_name}_chunks.json")
+        embeddings = storage.load_json(f"{base_name}_embeddings.json")
         
         if chunks and embeddings:
             rag_system.load_documents_from_storage(pdf_name, chunks, embeddings)
@@ -390,6 +319,27 @@ def load_processed_pdf(pdf_name):
         logger.error(f"❌ Failed to load processed PDF {pdf_name}: {e}")
         logger.error(traceback.format_exc())
         raise Exception(f"Failed to load processed PDF: {str(e)}")
+
+def list_available_pdfs():
+    """List PDFs available in storage"""
+    try:
+        # Get all .json chunk files
+        chunk_files = [f for f in storage.list_files() if f.endswith('_chunks.json')]
+        pdfs = []
+        
+        for chunk_file in chunk_files:
+            # Extract PDF name from chunk file name
+            # Format: {basename}_chunks.json
+            if '_chunks.json' in chunk_file:
+                pdf_name = chunk_file.replace('_chunks.json', '') + '.pdf'
+                pdfs.append(pdf_name)
+        
+        logger.info(f"📚 Found {len(pdfs)} processed PDFs in storage")
+        return pdfs
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to list PDFs: {e}")
+        return []
 
 # ----------------- Session Management -----------------
 @app.before_request
@@ -422,7 +372,7 @@ def internal_error(error):
 def index():
     """Main page - serve the chat interface"""
     try:
-        pdfs = list_pdfs() if clients_initialized else []
+        pdfs = list_available_pdfs()
         
         # Initialize session with security
         if 'session_id' not in session:
@@ -438,7 +388,7 @@ def index():
         
         return render_template("index.html", 
                              pdfs=pdfs, 
-                             clients_ok=clients_initialized,
+                             clients_ok=True,  # Always true for Render
                              current_pdf=current_pdf,
                              has_documents=has_documents)
                              
@@ -487,9 +437,6 @@ def upload_pdf():
 def load_existing_pdf():
     """Load existing PDF from storage"""
     try:
-        if not clients_initialized:
-            return jsonify({"error": "Cloud storage unavailable"}), 500
-            
         data = request.get_json()
         if not data:
             return jsonify({"error": "No JSON data provided"}), 400
@@ -500,17 +447,12 @@ def load_existing_pdf():
         
         logger.info(f"📥 Attempting to load PDF: {pdf_name}")
         
-        # Check if PDF exists
-        if not file_exists("pdfs", pdf_name):
-            logger.error(f"❌ PDF not found in storage: {pdf_name}")
-            return jsonify({"error": f"PDF '{pdf_name}' not found in storage"}), 404
-        
         # Check if PDF is already processed
         if not is_pdf_processed(pdf_name):
             logger.error(f"❌ PDF not processed: {pdf_name}")
-            return jsonify({"error": f"PDF '{pdf_name}' is not processed yet"}), 400
+            return jsonify({"error": f"PDF '{pdf_name}' is not processed yet. Please upload it first."}), 400
         
-        logger.info(f"✅ PDF {pdf_name} exists and is processed, loading...")
+        logger.info(f"✅ PDF {pdf_name} is processed, loading...")
         
         # Load the processed PDF
         chunk_count = load_processed_pdf(pdf_name)
@@ -554,7 +496,7 @@ def chat():
         
         if rag_system.chunks and current_pdf_name:
             # Search for more chunks to get better context
-            relevant_chunks = rag_system.search(user_input, k=8)  # Increased from 5 to 8
+            relevant_chunks = rag_system.search(user_input, k=8)
             logger.info(f"🔍 Found {len(relevant_chunks)} relevant chunks")
             
             if relevant_chunks:
@@ -582,6 +524,8 @@ def clear_documents():
     """Clear current documents from RAG system"""
     try:
         current_pdf = rag_system.current_pdf_name
+        
+        # Clear from RAG system
         rag_system.clear_documents()
         
         # Clear session
@@ -590,18 +534,50 @@ def clear_documents():
         
         logger.info(f"🧹 Cleared documents for PDF: {current_pdf}")
         
-        return jsonify({"success": "Current PDF cleared from memory"})
+        return jsonify({
+            "success": "Current PDF cleared from memory",
+            "cleared_pdf": current_pdf
+        })
     except Exception as e:
         logger.error(f"❌ Clear documents error: {e}")
+        return jsonify({"error": str(e)}), 500
+
+@app.route("/clear-storage", methods=["POST"])
+def clear_storage():
+    """Clear all stored PDFs from temporary storage (for development)"""
+    try:
+        # Only allow in development or with authentication in production
+        if os.environ.get("FLASK_ENV") != "development":
+            return jsonify({"error": "This endpoint is only available in development mode"}), 403
+        
+        cleared_files = 0
+        all_files = storage.list_files()
+        
+        for filename in all_files:
+            if storage.delete_file(filename):
+                cleared_files += 1
+        
+        # Clear RAG system
+        rag_system.clear_documents()
+        
+        # Clear session
+        session.clear()
+        
+        logger.info(f"🧹 Cleared {cleared_files} files from storage")
+        
+        return jsonify({
+            "success": f"Cleared {cleared_files} files from storage",
+            "cleared_count": cleared_files
+        })
+        
+    except Exception as e:
+        logger.error(f"❌ Clear storage error: {e}")
         return jsonify({"error": str(e)}), 500
 
 @app.route("/health")
 def health():
     """Comprehensive health check endpoint"""
     try:
-        # Check storage connectivity
-        storage_healthy = clients_initialized and bucket.exists()
-        
         # Check RAG system status
         rag_healthy = rag_system is not None
         rag_chunks_loaded = len(rag_system.chunks) if rag_system else 0
@@ -609,30 +585,74 @@ def health():
         # Check LLM client status
         llm_healthy = llm_client is not None and hasattr(llm_client, 'configured') and llm_client.configured
         
+        # Check storage status
+        storage_healthy = True  # Local storage is always available
+        
         # Determine overall status
-        if storage_healthy and rag_healthy and llm_healthy:
+        if rag_healthy and llm_healthy:
             status = "healthy"
-        elif storage_healthy and rag_healthy:
-            status = "degraded"  # LLM might be disabled intentionally
+        elif rag_healthy:
+            status = "degraded"  # LLM might be disabled
         else:
             status = "unhealthy"
         
         return jsonify({
             "status": status,
             "timestamp": datetime.utcnow().isoformat(),
-            "project": PROJECT_ID,
+            "deployment": "Render",
             "storage_healthy": storage_healthy,
             "rag_system_healthy": rag_healthy,
             "llm_client_healthy": llm_healthy,
-            "clients_initialized": clients_initialized,
-            "bucket": BUCKET_NAME,
             "current_pdf": rag_system.current_pdf_name if rag_system else None,
             "rag_chunks_loaded": rag_chunks_loaded,
-            "version": "1.0.0"
+            "available_pdfs": len(list_available_pdfs()),
+            "version": "2.0.0-render",
+            "environment": os.environ.get("FLASK_ENV", "production")
         })
     except Exception as e:
         logger.error(f"❌ Health check failed: {e}")
         return jsonify({"status": "unhealthy", "error": str(e)}), 500
+
+@app.route("/status")
+def status():
+    """Detailed status endpoint"""
+    try:
+        pdfs = list_available_pdfs()
+        
+        return jsonify({
+            "status": "operational",
+            "timestamp": datetime.utcnow().isoformat(),
+            "rag_system": {
+                "initialized": rag_system is not None,
+                "current_pdf": rag_system.current_pdf_name if rag_system else None,
+                "chunks_loaded": len(rag_system.chunks) if rag_system else 0,
+                "index_built": rag_system.index is not None if rag_system else False
+            },
+            "llm_client": {
+                "initialized": llm_client is not None,
+                "configured": llm_client.configured if llm_client else False,
+                "gemini_available": bool(GEMINI_API_KEY)
+            },
+            "storage": {
+                "type": "local_temporary",
+                "base_folder": storage.base_folder,
+                "files_count": len(storage.list_files()),
+                "available_pdfs": pdfs
+            },
+            "session": {
+                "session_id": session.get('session_id'),
+                "current_pdf": session.get('current_pdf'),
+                "has_documents": session.get('has_documents', False)
+            },
+            "limits": {
+                "max_upload_size": "16MB",
+                "chunk_size": "600 characters",
+                "session_lifetime": "1 hour"
+            }
+        })
+    except Exception as e:
+        logger.error(f"❌ Status endpoint error: {e}")
+        return jsonify({"error": str(e)}), 500
 
 # Test endpoint to verify the system is working
 @app.route("/test", methods=["GET"])
@@ -643,13 +663,43 @@ def test_endpoint():
         "timestamp": datetime.utcnow().isoformat(),
         "rag_system_ready": rag_system is not None,
         "llm_client_ready": llm_client is not None and hasattr(llm_client, 'configured') and llm_client.configured,
-        "storage_ready": clients_initialized,
         "current_pdf": rag_system.current_pdf_name if rag_system else None,
         "chunks_loaded": len(rag_system.chunks) if rag_system else 0,
-        "message": "PDF RAG Chatbot is running correctly!"
+        "message": "PDF RAG Chatbot is running correctly on Render!",
+        "deployment": "Render",
+        "port": PORT
+    })
+
+@app.route("/api/info")
+def api_info():
+    """API information endpoint"""
+    return jsonify({
+        "name": "PDF RAG Chatbot",
+        "version": "2.0.0",
+        "description": "Retrieval-Augmented Generation chatbot for PDF documents",
+        "deployment": "Render",
+        "endpoints": {
+            "GET /": "Main interface",
+            "POST /upload": "Upload and process PDF",
+            "POST /load": "Load existing PDF",
+            "POST /chat": "Chat with loaded PDF",
+            "POST /clear": "Clear current PDF",
+            "GET /health": "Health check",
+            "GET /status": "Detailed status",
+            "GET /test": "Test endpoint"
+        },
+        "features": [
+            "PDF text extraction",
+            "Intelligent text chunking",
+            "FAISS vector embeddings",
+            "Semantic similarity search",
+            "Google Gemini AI responses",
+            "Session-based document management"
+        ]
     })
 
 if __name__ == "__main__":
-    port = int(os.environ.get("PORT", 8080))
-    logger.info(f"🚀 Starting PDF RAG Chatbot on port {port}")
-    app.run(host="0.0.0.0", port=port, debug=False)
+    logger.info(f"🚀 Starting PDF RAG Chatbot on Render (port: {PORT})")
+    logger.info(f"🔑 Gemini API Key configured: {bool(GEMINI_API_KEY)}")
+    logger.info(f"📁 Temporary storage: {storage.base_folder}")
+    app.run(host="0.0.0.0", port=PORT, debug=os.environ.get("FLASK_ENV") == "development")
