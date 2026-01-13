@@ -1,12 +1,13 @@
-Flask
-google-cloud-storage
-pypdf
-faiss-cpu
-numpy
-torch
-transformers
-sentence-transformers
-accelerate
-gunicorn
-nltk
-google-generativeai
+# requirements.txt for Render
+Flask==2.3.3
+pypdf==3.17.0
+faiss-cpu==1.7.4
+numpy==1.24.3
+torch==2.1.0
+transformers==4.35.2
+sentence-transformers==2.2.2
+accelerate==0.25.0
+gunicorn==21.2.0
+nltk==3.8.1
+google-generativeai==0.3.2
+python-dotenv==1.0.0  # For environment variable management
