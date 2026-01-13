@@ -1,9 +1,8 @@
-# Dockerfile for Render
 FROM python:3.11-slim
 
 WORKDIR /app
 
-# Install system dependencies for Render
+# Install system dependencies
 RUN apt-get update && apt-get install -y \
     gcc \
     g++ \
@@ -23,11 +22,8 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)"
 # Copy application code
 COPY . .
 
-# Create necessary directories
-RUN mkdir -p templates utils static/uploads
-
 # Expose the port
 EXPOSE 10000
 
-# Use gunicorn for production (Render requirement)
-CMD exec gunicorn --bind :$PORT --workers 2 --threads 4 --timeout 120 app:app
+# Use gunicorn for production
+CMD exec gunicorn --bind :$PORT --workers 1 --threads 4 --timeout 120 app:app
