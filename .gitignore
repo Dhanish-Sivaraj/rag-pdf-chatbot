@@ -41,5 +41,5 @@ service-account.json
 # Node (if any frontend builds)
 node_modules/
 
-# Google SDK and Auth
-gcloud/
+# DON'T ignore templates!
+# templates/
