@@ -22,6 +22,13 @@ RUN python -c "import nltk; nltk.download('punkt', quiet=True)"
 # Copy application code
 COPY . .
 
+# Create templates directory if it doesn't exist
+RUN mkdir -p templates
+
+# Set environment variables
+ENV PYTHONPATH=/app
+ENV PORT=10000
+
 # Expose the port
 EXPOSE 10000
 
