@@ -26,12 +26,6 @@ COPY . .
 # Create necessary directories
 RUN mkdir -p templates utils static/uploads
 
-# Set environment variables
-ENV PYTHONPATH=/app
-ENV PORT=10000  # Render uses port 10000
-ENV GEMINI_API_KEY=""
-ENV SECRET_KEY="your-render-secret-key"
-
 # Expose the port
 EXPOSE 10000
 
